@@ -99,59 +99,84 @@ static switch_status_t send_text(switch_core_session_t *session, char* bugname, 
 
 SWITCH_STANDARD_API(fork_function)
 {
-    char *mycmd = NULL, *argv[10] = { 0 };
+    char *mycmd = NULL;
+    char *argv[10] = { 0 };
     int argc = 0;
     switch_status_t status = SWITCH_STATUS_FALSE;
     char *bugname = MY_BUG_NAME;
+    switch_core_session_t *lsession = NULL; /* Declared at top to avoid 'goto' errors */
 
     if (!zstr(cmd) && (mycmd = strdup(cmd))) {
         argc = switch_separate_string(mycmd, ' ', argv, (sizeof(argv) / sizeof(argv[0])));
     }
 
     if (zstr(cmd) || argc < 2) {
+        /* USAGE is defined in your .h file */
         stream->write_function(stream, "-USAGE: %s\n", FORK_API_SYNTAX);
         goto done;
     }
 
-    switch_core_session_t *lsession = NULL;
-    if ((lsession = switch_core_session_locate(argv[0]))) {
-        if (!strcasecmp(argv[1], "stop")) {
-            char *text = (argc > 3) ? argv[3] : (argc > 2 && (argv[2][0] == '{' || argv[2][0] == '[')) ? argv[2] : NULL;
-            if (argc > 2 && !text) bugname = argv[2];
-            status = do_stop(lsession, bugname, text);
-        } else if (!strcasecmp(argv[1], "start") && argc >= 4) {
-            char host[MAX_WS_URL_LEN], path[MAX_PATH_LEN];
-            unsigned int port;
-            int sslFlags, sampling = 8000;
-            switch_media_bug_flag_t flags = SMBF_READ_STREAM;
-            char *metadata = (argc > 6) ? argv[6] : (argc > 5 && (argv[5][0] == '{' || argv[5][0] == '[')) ? argv[5] : NULL;
-            if (argc > 5 && !metadata) bugname = argv[5];
-
-            if (!strcmp(argv[3], "mixed")) flags |= SMBF_WRITE_STREAM;
-            else if (!strcmp(argv[3], "stereo")) flags |= (SMBF_WRITE_STREAM | SMBF_STEREO);
-            
-            sampling = (!strcmp(argv[4], "16k")) ? 16000 : (!strcmp(argv[4], "8k")) ? 8000 : atoi(argv[4]);
-
-            if (parse_ws_uri(switch_core_session_get_channel(lsession), argv[2], host, path, &port, &sslFlags)) {
-                status = start_capture(lsession, flags, host, port, path, sampling, sslFlags, bugname, metadata);
-            }
-        } else if (!strcasecmp(argv[1], "send_text")) {
-            status = send_text(lsession, (argc > 3 ? argv[2] : bugname), (argc > 3 ? argv[3] : argv[2]));
-        } else if (!strcasecmp(argv[1], "pause")) {
-            status = do_pauseresume(lsession, (argc > 2 ? argv[2] : bugname), 1);
-        } else if (!strcasecmp(argv[1], "resume")) {
-            status = do_pauseresume(lsession, (argc > 2 ? argv[2] : bugname), 0);
-        }
-        switch_core_session_rwunlock(lsession);
+    if (!(lsession = switch_core_session_locate(argv[0]))) {
+        stream->write_function(stream, "-ERR Operation Failed: session not found\n");
+        goto done;
     }
 
-    if (status == SWITCH_STATUS_SUCCESS) stream->write_function(stream, "+OK\n");
-    else stream->write_function(stream, "-ERR\n");
+    /* Command Routing */
+    if (!strcasecmp(argv[1], "start") && argc >= 4) {
+        char host[MAX_WS_URL_LEN], path[MAX_PATH_LEN];
+        unsigned int port;
+        int sslFlags, sampling = 8000;
+        switch_media_bug_flag_t flags = SMBF_READ_STREAM;
+        char *metadata = NULL;
+
+        /* Metadata/Bugname logic */
+        if (argc > 6) { 
+            bugname = argv[5]; 
+            metadata = argv[6]; 
+        } else if (argc > 5) { 
+            if (argv[5][0] == '{' || argv[5][0] == '[') metadata = argv[5];
+            else bugname = argv[5];
+        }
+
+        if (!strcmp(argv[3], "mixed")) flags |= SMBF_WRITE_STREAM;
+        else if (!strcmp(argv[3], "stereo")) flags |= (SMBF_WRITE_STREAM | SMBF_STEREO);
+
+        sampling = (!strcmp(argv[4], "16k")) ? 16000 : (!strcmp(argv[4], "8k")) ? 8000 : atoi(argv[4]);
+
+        if (parse_ws_uri(switch_core_session_get_channel(lsession), argv[2], host, path, &port, &sslFlags)) {
+            status = start_capture(lsession, flags, host, port, path, sampling, sslFlags, bugname, metadata);
+        }
+    } 
+    else if (!strcasecmp(argv[1], "stop")) {
+        char *text = NULL;
+        if (argc > 3) {
+            bugname = argv[2];
+            text = argv[3];
+        } else if (argc > 2) {
+            if (argv[2][0] == '{' || argv[2][0] == '[') text = argv[2];
+            else bugname = argv[2];
+        }
+        status = do_stop(lsession, bugname, text);
+    }
+    else if (!strcasecmp(argv[1], "send_text")) {
+        char *text = (argc > 3) ? argv[3] : argv[2];
+        if (argc > 3) bugname = argv[2];
+        status = send_text(lsession, bugname, text);
+    }
+    else if (!strcasecmp(argv[1], "pause")) status = do_pauseresume(lsession, (argc > 2 ? argv[2] : bugname), 1);
+    else if (!strcasecmp(argv[1], "resume")) status = do_pauseresume(lsession, (argc > 2 ? argv[2] : bugname), 0);
+    else if (!strcasecmp(argv[1], "graceful-shutdown")) status = do_graceful_shutdown(lsession, (argc > 2 ? argv[2] : bugname));
+
+    switch_core_session_rwunlock(lsession);
+
+    if (status == SWITCH_STATUS_SUCCESS) stream->write_function(stream, "+OK Success\n");
+    else stream->write_function(stream, "-ERR Operation Failed\n");
 
 done:
     switch_safe_free(mycmd);
     return SWITCH_STATUS_SUCCESS;
 }
+
 
 SWITCH_MODULE_LOAD_FUNCTION(mod_audio_fork_load)
 {
