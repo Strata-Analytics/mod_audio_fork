@@ -83,6 +83,11 @@ static switch_status_t do_stop(switch_core_session_t *session, char* bugname, ch
     return fork_session_cleanup(session, bugname, text, 0);
 }
 
+static switch_status_t do_graceful_shutdown(switch_core_session_t *session, char* bugname)
+{
+    return fork_session_cleanup(session, bugname, "{\"graceful\": true}", 0);
+}
+
 static switch_status_t do_pauseresume(switch_core_session_t *session, char* bugname, int pause)
 {
     return fork_session_pauseresume(session, bugname, pause);
