@@ -95,8 +95,6 @@ static switch_status_t send_text(switch_core_session_t *session, char* bugname, 
     return SWITCH_STATUS_FALSE;
 }
 
-#define FORK_API_SYNTAX "<uuid> [start | stop | send_text | pause | resume] [wss-url] [mono|mixed|stereo] [rate] [bugname] [metadata]"
-
 SWITCH_STANDARD_API(fork_function)
 {
     char *mycmd = NULL;
